@@ -3,3 +3,6 @@ pandas
 gspread
 oauth2client
 PyPDF2
+pytesseract
+Pillow
+google-generativeai
