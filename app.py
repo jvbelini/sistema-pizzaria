@@ -60,7 +60,7 @@ def extrair_precos_com_ia(texto, lista_produtos):
     Se não encontrar nenhum preço claro, retorne {{}}
     """
     
-   try:
+       try:
         # Pergunta ao Google quais modelos estão ativos agora para a sua chave
         modelos = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         
