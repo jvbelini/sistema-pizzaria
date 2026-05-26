@@ -7,7 +7,7 @@ import json
 import pytesseract
 from PIL import Image
 from datetime import datetime
-import google.generativeai as genai # <-- Nova biblioteca da IA!
+import google.generativeai as genai
 
 st.set_page_config(page_title="Compras Pizzaria - Franquia", layout="wide")
 
@@ -18,7 +18,7 @@ st.sidebar.title("📍 Escolha a Unidade")
 unidade_selecionada = st.sidebar.radio("Qual loja você vai cotar agora?", ["Maringá", "Bauru"])
 
 NOME_PLANILHA = 'MARINGA ESTOQUE ' if unidade_selecionada == "Maringá" else 'BAURU ESTOQUE'
-nome_aba_cozinha = 'COZINHA' if unidade_selecionada == "Maringá" else 'COZINHA'
+nome_aba_cozinha = 'COZINHA' if unidade_selecionada == "Maringá" else 'COZINHA '
 
 st.title(f"🍕 Cotações com IA - {unidade_selecionada}")
 
@@ -37,11 +37,10 @@ def conectar_google_sheets():
         credenciais = ServiceAccountCredentials.from_json_keyfile_dict(cred_dict, escopo)
     return gspread.authorize(credenciais)
 
-# --- A MÁGICA ACONTECE AQUI ---
+# --- A MÁGICA DA INTELIGÊNCIA ARTIFICIAL ACONTECE AQUI ---
 def extrair_precos_com_ia(texto, lista_produtos):
     if not texto.strip(): return {}
     
-    # O comando (prompt) que o seu sistema dá para o meu "cérebro"
     comando = f"""
     Você é um assistente de compras especialista em restaurantes.
     Abaixo, vou te passar uma mensagem (de WhatsApp/PDF) de um fornecedor e a minha lista EXATA de produtos do estoque.
@@ -60,11 +59,11 @@ def extrair_precos_com_ia(texto, lista_produtos):
     Se não encontrar nenhum preço claro, retorne {{}}
     """
     
-       try:
-        # Pergunta ao Google quais modelos estão ativos agora para a sua chave
+    try:
+        # Pergunta ao Google quais modelos estão ativos agora
         modelos = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         
-        # Escolhe o modelo automaticamente (dá preferência ao mais rápido)
+        # Escolhe o modelo automaticamente (tenta usar o mais rápido/recente)
         modelo_escolhido = modelos[0] 
         for m in modelos:
             if 'flash' in m.lower():
@@ -80,11 +79,12 @@ def extrair_precos_com_ia(texto, lista_produtos):
     except Exception as e:
         st.error(f"Erro na interpretação da IA: {e}")
         return {}
-    try:
-        cliente = conectar_google_sheets()
-        planilha = cliente.open(NOME_PLANILHA)
-        aba_cozinha = planilha.worksheet(nome_aba_cozinha)
-        dados = aba_cozinha.get_all_values()
+
+try:
+    cliente = conectar_google_sheets()
+    planilha = cliente.open(NOME_PLANILHA)
+    aba_cozinha = planilha.worksheet(nome_aba_cozinha)
+    dados = aba_cozinha.get_all_values()
     
     try:
         aba_historico = planilha.worksheet('HISTORICO')
@@ -121,7 +121,7 @@ def extrair_precos_com_ia(texto, lista_produtos):
             
             if st.button("➕ Analisar com Inteligência Artificial"):
                 if nome_fornecedor:
-                    with st.spinner(f"O Gemini está lendo e interpretando a lista da {nome_fornecedor}..."):
+                    with st.spinner(f"O Gemini está a ler e interpretar a lista da {nome_fornecedor}..."):
                         texto_extraido = (texto_colado + " \n") if texto_colado else ""
                         
                         if arquivo_pdf:
@@ -134,14 +134,14 @@ def extrair_precos_com_ia(texto, lista_produtos):
                             texto_extraido += pytesseract.image_to_string(imagem, lang='por') + " \n"
                         
                         if texto_extraido.strip():
-                            # AGORA CHAMA A FUNÇÃO DA IA
+                            # CHAMA A FUNÇÃO DA IA AQUI
                             precos_achados = extrair_precos_com_ia(texto_extraido, lista_necessidades)
                             
                             if precos_achados:
                                 st.session_state['cotacoes_fornecedores'][nome_fornecedor] = precos_achados
                                 st.success(f"✅ Preços guardados! A IA identificou {len(precos_achados)} produtos com sucesso.")
                             else:
-                                st.warning("A IA leu o texto, mas não conseguiu associar nenhum preço aos produtos que você precisa comprar.")
+                                st.warning("A IA leu o texto, mas não conseguiu associar nenhum preço aos produtos que precisa comprar.")
                         else:
                             st.error("Insira algum texto, PDF ou Imagem!")
                 else:
