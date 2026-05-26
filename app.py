@@ -18,7 +18,7 @@ st.sidebar.title("📍 Escolha a Unidade")
 unidade_selecionada = st.sidebar.radio("Qual loja você vai cotar agora?", ["Maringá", "Bauru"])
 
 NOME_PLANILHA = 'MARINGA ESTOQUE ' if unidade_selecionada == "Maringá" else 'BAURU ESTOQUE'
-nome_aba_cozinha = 'COZINHA' if unidade_selecionada == "Maringá" else 'COZINHA'
+nome_aba_cozinha = 'COZINHA' if unidade_selecionada == "Maringá" else 'COZINHA '
 
 st.title(f"🍕 Cotações com IA - {unidade_selecionada}")
 
@@ -153,6 +153,7 @@ try:
             if st.button("Limpar Cotações"):
                 st.session_state['cotacoes_fornecedores'] = {}
                 st.session_state['resultados_calculados'] = []
+                st.session_state['mostrar_zap'] = False
                 st.rerun()
 
         st.divider()
@@ -198,6 +199,7 @@ try:
                 })
             
             st.session_state['resultados_calculados'] = resultados
+            st.session_state['mostrar_zap'] = False # Reseta o zap ao calcular de novo
 
         if st.session_state['resultados_calculados']:
             df_final = pd.DataFrame(st.session_state['resultados_calculados'])
@@ -214,25 +216,60 @@ try:
                         st.info(f"**Total a pagar: R$ {total_forn:.2f}**")
                         
             st.divider()
-            if st.button("💾 Guardar Preços no Histórico do Drive", type="secondary", use_container_width=True):
-                data_hoje = datetime.now().strftime("%d/%m/%Y %H:%M")
-                dados_historico = []
+            
+            # Botoes finais: Salvar Drive e Gerar Zap
+            col_btn1, col_btn2 = st.columns(2)
+            
+            with col_btn1:
+                if st.button("💾 Guardar Preços no Histórico do Drive", type="secondary", use_container_width=True):
+                    data_hoje = datetime.now().strftime("%d/%m/%Y %H:%M")
+                    dados_historico = []
+                    
+                    for res in st.session_state['resultados_calculados']:
+                        if res['FORNECEDOR'] != "Sem Cotação":
+                            dados_historico.append([
+                                data_hoje, 
+                                unidade_selecionada, 
+                                res['FORNECEDOR'], 
+                                res['PRODUTO'], 
+                                res['PREÇO UNIT (R$)']
+                            ])
+                    
+                    if dados_historico:
+                        aba_historico.append_rows(dados_historico)
+                        st.success("✅ Histórico guardado na sua planilha do Drive com sucesso!")
+                    else:
+                        st.warning("Não há preços calculados para salvar.")
+
+            with col_btn2:
+                if st.button("📱 Gerar Texto para WhatsApp", type="secondary", use_container_width=True):
+                    st.session_state['mostrar_zap'] = True
+            
+            # Caixa de texto do WhatsApp
+            if st.session_state.get('mostrar_zap', False):
+                texto_zap = f"🛒 *RESUMO DE COMPRAS - {unidade_selecionada.upper()}*\n"
+                texto_zap += f"📅 Data: {datetime.now().strftime('%d/%m/%Y')}\n\n"
                 
-                for res in st.session_state['resultados_calculados']:
-                    if res['FORNECEDOR'] != "Sem Cotação":
-                        dados_historico.append([
-                            data_hoje, 
-                            unidade_selecionada, 
-                            res['FORNECEDOR'], 
-                            res['PRODUTO'], 
-                            res['PREÇO UNIT (R$)']
-                        ])
+                for forn in fornecedores_vencedores:
+                    if forn == "Sem Cotação": 
+                        continue
+                    
+                    df_forn = df_final[df_final['FORNECEDOR'] == forn]
+                    total_forn = df_forn['TOTAL (R$)'].sum()
+                    
+                    texto_zap += f"📦 *Fornecedor: {forn}*\n"
+                    for _, row in df_forn.iterrows():
+                        texto_zap += f"- {row['QUANTIDADE']}x {row['PRODUTO']} (R$ {row['PREÇO UNIT (R$)']:.2f})\n"
+                    texto_zap += f"💰 *Total {forn}: R$ {total_forn:.2f}*\n\n"
                 
-                if dados_historico:
-                    aba_historico.append_rows(dados_historico)
-                    st.success("✅ Histórico guardado na sua planilha do Drive com sucesso!")
-                else:
-                    st.warning("Não há preços calculados para salvar.")
+                # Adiciona itens sem cotação no final como alerta
+                df_sem_cotacao = df_final[df_final['FORNECEDOR'] == "Sem Cotação"]
+                if not df_sem_cotacao.empty:
+                    texto_zap += "⚠️ *ITENS SEM COTAÇÃO (Verificar):*\n"
+                    for _, row in df_sem_cotacao.iterrows():
+                        texto_zap += f"- {row['QUANTIDADE']}x {row['PRODUTO']}\n"
+                
+                st.text_area("Copie o texto abaixo e cole no WhatsApp do gerente:", value=texto_zap, height=350)
 
 except Exception as e:
     st.error(f"Erro: {e}")
