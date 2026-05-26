@@ -18,7 +18,7 @@ st.sidebar.title("📍 Escolha a Unidade")
 unidade_selecionada = st.sidebar.radio("Qual loja você vai cotar agora?", ["Maringá", "Bauru"])
 
 NOME_PLANILHA = 'MARINGA ESTOQUE ' if unidade_selecionada == "Maringá" else 'BAURU ESTOQUE'
-nome_aba_cozinha = 'COZINHA' if unidade_selecionada == "Maringá" else 'COZINHA '
+nome_aba_cozinha = 'COZINHA' if unidade_selecionada == "Maringá" else 'COZINHA'
 
 st.title(f"🍕 Cotações com IA - {unidade_selecionada}")
 
