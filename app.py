@@ -62,7 +62,7 @@ def extrair_precos_com_ia(texto, lista_produtos):
     
     try:
         # Chama a IA super rápida do Gemini
-        modelo = genai.GenerativeModel('gemini-1.5-flash')
+        modelo = genai.GenerativeModel('gemini-pro')
         resposta = modelo.generate_content(comando)
         
         # Limpa o texto caso a IA mande com a formatação do JSON
