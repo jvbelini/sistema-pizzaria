@@ -80,7 +80,6 @@ def extrair_precos_com_ia(texto, lista_produtos):
     except Exception as e:
         st.error(f"Erro na interpretação da IA: {e}")
         return {}
-
 try:
     cliente = conectar_google_sheets()
     planilha = cliente.open(NOME_PLANILHA)
