@@ -60,9 +60,18 @@ def extrair_precos_com_ia(texto, lista_produtos):
     Se não encontrar nenhum preço claro, retorne {{}}
     """
     
-    try:
-        # Chama a IA super rápida do Gemini
-        modelo = genai.GenerativeModel('gemini-pro')
+   try:
+        # Pergunta ao Google quais modelos estão ativos agora para a sua chave
+        modelos = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        
+        # Escolhe o modelo automaticamente (dá preferência ao mais rápido)
+        modelo_escolhido = modelos[0] 
+        for m in modelos:
+            if 'flash' in m.lower():
+                modelo_escolhido = m
+                break
+                
+        modelo = genai.GenerativeModel(modelo_escolhido)
         resposta = modelo.generate_content(comando)
         
         # Limpa o texto caso a IA mande com a formatação do JSON
