@@ -3,150 +3,155 @@ import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import PyPDF2
-import re
-import difflib
 import json
+import pytesseract
+from PIL import Image
+from datetime import datetime
+import google.generativeai as genai # <-- Nova biblioteca da IA!
 
 st.set_page_config(page_title="Compras Pizzaria - Franquia", layout="wide")
 
-# --- MENU LATERAL (ESCOLHA DA UNIDADE) ---
+# Configurar a Inteligência Artificial do Google Gemini
+genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+
 st.sidebar.title("📍 Escolha a Unidade")
-unidade_selecionada = st.sidebar.radio(
-    "Qual loja você vai cotar agora?", 
-    ["Maringá", "Bauru"]
-)
+unidade_selecionada = st.sidebar.radio("Qual loja você vai cotar agora?", ["Maringá", "Bauru"])
 
-# Define o nome exato da folha de cálculo baseado na escolha do menu
-if unidade_selecionada == "Maringá":
-    NOME_PLANILHA = 'MARINGA ESTOQUE ' 
-else:
-    NOME_PLANILHA = 'BAURU ESTOQUE' # Se houver espaço no final do nome, adicione aqui
+NOME_PLANILHA = 'MARINGA ESTOQUE ' if unidade_selecionada == "Maringá" else 'BAURU ESTOQUE'
+nome_aba_cozinha = 'COZINHA' if unidade_selecionada == "Maringá" else 'COZINHA '
 
-st.title(f"🍕 Sistema Inteligente de Cotações - {unidade_selecionada}")
+st.title(f"🍕 Cotações com IA - {unidade_selecionada}")
 
-# --- BANCO DE MEMÓRIA DO SISTEMA ---
 if 'cotacoes_fornecedores' not in st.session_state:
     st.session_state['cotacoes_fornecedores'] = {} 
+if 'resultados_calculados' not in st.session_state:
+    st.session_state['resultados_calculados'] = []
 
-# 1. Ligar ao Google Drive (Versão Nuvem e Local)
 @st.cache_resource
 def conectar_google_sheets():
     escopo = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     try:
-        # Tenta usar o ficheiro local (quando roda no seu PC)
         credenciais = ServiceAccountCredentials.from_json_keyfile_name('credenciais.json', escopo)
     except Exception:
-        # Se não encontrar o ficheiro (quando estiver no servidor online), puxa do cofre
         cred_dict = json.loads(st.secrets["google_credentials"])
         credenciais = ServiceAccountCredentials.from_json_keyfile_dict(cred_dict, escopo)
-        
     return gspread.authorize(credenciais)
 
-# 2. Função Inteligente de Caçar Preços
-def extrair_precos_do_texto(texto, lista_produtos):
-    texto = texto.lower()
-    precos_encontrados = {}
-    padrao_preco = r'(?:r\$)?\s*(\d+[.,]\d{2})'
-    linhas = texto.split('\n')
+# --- A MÁGICA ACONTECE AQUI ---
+def extrair_precos_com_ia(texto, lista_produtos):
+    if not texto.strip(): return {}
     
-    for linha in linhas:
-        match = re.search(padrao_preco, linha)
-        if match:
-            preco = float(match.group(1).replace(',', '.'))
-            texto_item_fornecedor = re.sub(padrao_preco, '', linha).strip()
-            
-            melhor_produto_planilha = None
-            maior_nota_similaridade = 0
-            
-            for produto_planilha in lista_produtos:
-                prod_limpo = str(produto_planilha).lower().strip()
-                nota = difflib.SequenceMatcher(None, texto_item_fornecedor, prod_limpo).ratio()
-                
-                if prod_limpo:
-                    palavra_chave = prod_limpo.split()[0]
-                    if palavra_chave in texto_item_fornecedor:
-                        nota += 0.2 
-                
-                if nota > 0.4 and nota > maior_nota_similaridade:
-                    maior_nota_similaridade = nota
-                    melhor_produto_planilha = produto_planilha
-            
-            if melhor_produto_planilha:
-                if melhor_produto_planilha in precos_encontrados:
-                    if preco < precos_encontrados[melhor_produto_planilha]:
-                        precos_encontrados[melhor_produto_planilha] = preco
-                else:
-                    precos_encontrados[melhor_produto_planilha] = preco
-                
-    return precos_encontrados
+    # O comando (prompt) que o seu sistema dá para o meu "cérebro"
+    comando = f"""
+    Você é um assistente de compras especialista em restaurantes.
+    Abaixo, vou te passar uma mensagem (de WhatsApp/PDF) de um fornecedor e a minha lista EXATA de produtos do estoque.
+    
+    Sua tarefa é ler a mensagem bagunçada e identificar quais dos meus produtos estão sendo oferecidos e qual o preço deles. 
+    Seja inteligente: "Mussa" é "Mussarela", "F. Trigo" é "Farinha de Trigo", etc. Ignore emojis e erros de digitação.
+    
+    Texto do Fornecedor:
+    {texto}
+    
+    Minha Lista de Produtos:
+    {lista_produtos}
+    
+    Retorne APENAS um objeto JSON válido. A chave deve ser o nome EXATO do produto da minha lista, e o valor deve ser o preço em formato numérico (float). Não escreva NENHUM texto antes ou depois do JSON.
+    Exemplo: {{"Farinha de Trigo 5kg": 25.90, "Mussarela": 35.50}}
+    Se não encontrar nenhum preço claro, retorne {{}}
+    """
+    
+    try:
+        # Chama a IA super rápida do Gemini
+        modelo = genai.GenerativeModel('gemini-1.5-flash')
+        resposta = modelo.generate_content(comando)
+        
+        # Limpa o texto caso a IA mande com a formatação do JSON
+        texto_limpo = resposta.text.replace('```json', '').replace('```', '').strip()
+        return json.loads(texto_limpo)
+    except Exception as e:
+        st.error(f"Erro na interpretação da IA: {e}")
+        return {}
 
 try:
     cliente = conectar_google_sheets()
+    planilha = cliente.open(NOME_PLANILHA)
+    aba_cozinha = planilha.worksheet(nome_aba_cozinha)
+    dados = aba_cozinha.get_all_values()
     
-    # Ele abre a planilha dependendo do que estiver selecionado no menu lateral
-    planilha = cliente.open(NOME_PLANILHA).worksheet('COZINHA')
-    dados = planilha.get_all_values()
+    try:
+        aba_historico = planilha.worksheet('HISTORICO')
+    except gspread.exceptions.WorksheetNotFound:
+        aba_historico = planilha.add_worksheet(title="HISTORICO", rows="1000", cols="5")
+        aba_historico.append_row(["DATA", "UNIDADE", "FORNECEDOR", "PRODUTO", "PREÇO UNITÁRIO"])
     
     if dados:
         itens_comprar = []
         for linha in dados[1:]:
             if len(linha) >= 4 and linha[0].strip() != '':
                 try:
-                    pedir_esq = float(linha[3].replace(',', '.'))
-                    if pedir_esq > 0: itens_comprar.append(linha[0])
+                    if float(linha[3].replace(',', '.')) > 0: itens_comprar.append(linha[0])
                 except ValueError: pass
             if len(linha) >= 10 and linha[6].strip() != '':
                 try:
-                    pedir_dir = float(linha[9].replace(',', '.'))
-                    if pedir_dir > 0: itens_comprar.append(linha[6])
+                    if float(linha[9].replace(',', '.')) > 0: itens_comprar.append(linha[6])
                 except ValueError: pass
 
         lista_necessidades = list(set(itens_comprar)) 
 
-        st.subheader(f"📥 1. Inserir Cotações (Aplicado para: {unidade_selecionada})")
-        st.write("Insira o nome do fornecedor, cole os preços dele e clique em guardar.")
+        st.subheader("📥 1. Inserir Cotações (Texto, PDF ou Imagem)")
         
         with st.container(border=True):
             nome_fornecedor = st.text_input("Qual o nome deste fornecedor? (Ex: Difal, Riber)")
             
-            col1, col2 = st.columns(2)
+            col1, col2, col3 = st.columns(3)
             with col1:
-                texto_colado = st.text_area("Cole a mensagem do WhatsApp aqui:")
+                texto_colado = st.text_area("Texto do WhatsApp:")
             with col2:
-                arquivo_pdf = st.file_uploader("Ou envie a tabela em PDF:", type=['pdf'])
+                arquivo_pdf = st.file_uploader("Tabela em PDF:", type=['pdf'])
+            with col3:
+                arquivo_img = st.file_uploader("Foto ou Imagem:", type=['png', 'jpg', 'jpeg'])
             
-            if st.button("➕ Guardar Preços deste Fornecedor"):
+            if st.button("➕ Analisar com Inteligência Artificial"):
                 if nome_fornecedor:
-                    texto_extraido = (texto_colado + " ") if texto_colado else ""
-                    if arquivo_pdf:
-                        leitor_pdf = PyPDF2.PdfReader(arquivo_pdf)
-                        for pagina in leitor_pdf.pages:
-                            texto_extraido += pagina.extract_text() + " "
-                    
-                    if texto_extraido.strip():
-                        precos_achados = extrair_precos_do_texto(texto_extraido, lista_necessidades)
-                        st.session_state['cotacoes_fornecedores'][nome_fornecedor] = precos_achados
-                        st.success(f"✅ Preços da {nome_fornecedor} guardados! (Encontrados {len(precos_achados)} produtos).")
-                    else:
-                        st.error("Cole um texto ou envie um PDF primeiro!")
+                    with st.spinner(f"O Gemini está lendo e interpretando a lista da {nome_fornecedor}..."):
+                        texto_extraido = (texto_colado + " \n") if texto_colado else ""
+                        
+                        if arquivo_pdf:
+                            leitor_pdf = PyPDF2.PdfReader(arquivo_pdf)
+                            for pagina in leitor_pdf.pages:
+                                texto_extraido += pagina.extract_text() + " \n"
+                                
+                        if arquivo_img:
+                            imagem = Image.open(arquivo_img)
+                            texto_extraido += pytesseract.image_to_string(imagem, lang='por') + " \n"
+                        
+                        if texto_extraido.strip():
+                            # AGORA CHAMA A FUNÇÃO DA IA
+                            precos_achados = extrair_precos_com_ia(texto_extraido, lista_necessidades)
+                            
+                            if precos_achados:
+                                st.session_state['cotacoes_fornecedores'][nome_fornecedor] = precos_achados
+                                st.success(f"✅ Preços guardados! A IA identificou {len(precos_achados)} produtos com sucesso.")
+                            else:
+                                st.warning("A IA leu o texto, mas não conseguiu associar nenhum preço aos produtos que você precisa comprar.")
+                        else:
+                            st.error("Insira algum texto, PDF ou Imagem!")
                 else:
-                    st.error("Por favor, digite o nome do fornecedor antes de guardar.")
+                    st.error("Digite o nome do fornecedor!")
 
         if st.session_state['cotacoes_fornecedores']:
-            st.write("📊 **Fornecedores já registados nesta sessão:**")
             for forn, precos in st.session_state['cotacoes_fornecedores'].items():
                 st.caption(f"✔️ {forn} ({len(precos)} preços extraídos)")
-            
-            if st.button("Limpar todas as cotações guardadas"):
+            if st.button("Limpar Cotações"):
                 st.session_state['cotacoes_fornecedores'] = {}
+                st.session_state['resultados_calculados'] = []
                 st.rerun()
 
         st.divider()
 
-        st.subheader("🪄 2. Calcular Melhor Preço e Gerar Listas")
+        st.subheader("🪄 2. Calcular e Guardar Histórico")
         
-        if st.button("🏆 Calcular Listas de Compras Automáticas", type="primary", use_container_width=True):
-            
+        if st.button("🏆 Calcular Melhores Opções", type="primary", use_container_width=True):
             resultados = []
             df_quantidades = []
             for linha in dados[1:]:
@@ -166,7 +171,7 @@ try:
                 qtd = item['QTD']
                 
                 melhor_preco = float('inf')
-                melhor_fornecedor = "Sem Cotação (Verificar)"
+                melhor_fornecedor = "Sem Cotação"
                 
                 for forn, precos in st.session_state['cotacoes_fornecedores'].items():
                     if produto in precos:
@@ -174,8 +179,7 @@ try:
                             melhor_preco = precos[produto]
                             melhor_fornecedor = forn
                 
-                if melhor_preco == float('inf'):
-                    melhor_preco = 0.00
+                if melhor_preco == float('inf'): melhor_preco = 0.00
                 
                 resultados.append({
                     'FORNECEDOR': melhor_fornecedor,
@@ -185,10 +189,11 @@ try:
                     'TOTAL (R$)': qtd * melhor_preco
                 })
             
-            df_final = pd.DataFrame(resultados)
+            st.session_state['resultados_calculados'] = resultados
+
+        if st.session_state['resultados_calculados']:
+            df_final = pd.DataFrame(st.session_state['resultados_calculados'])
             fornecedores_vencedores = df_final['FORNECEDOR'].unique()
-            
-            st.success(f"Cálculo concluído! As listas abaixo são referentes à unidade de {unidade_selecionada}.")
             
             cols = st.columns(3) 
             for i, forn in enumerate(fornecedores_vencedores):
@@ -197,10 +202,29 @@ try:
                     total_forn = df_forn['TOTAL (R$)'].sum()
                     st.markdown(f"### 📦 {forn}")
                     st.dataframe(df_forn[['PRODUTO', 'QUANTIDADE', 'PREÇO UNIT (R$)']], hide_index=True)
-                    if forn != "Sem Cotação (Verificar)":
+                    if forn != "Sem Cotação":
                         st.info(f"**Total a pagar: R$ {total_forn:.2f}**")
-                    else:
-                        st.warning("Estes itens não foram encontrados nas cotações enviadas.")
+                        
+            st.divider()
+            if st.button("💾 Guardar Preços no Histórico do Drive", type="secondary", use_container_width=True):
+                data_hoje = datetime.now().strftime("%d/%m/%Y %H:%M")
+                dados_historico = []
+                
+                for res in st.session_state['resultados_calculados']:
+                    if res['FORNECEDOR'] != "Sem Cotação":
+                        dados_historico.append([
+                            data_hoje, 
+                            unidade_selecionada, 
+                            res['FORNECEDOR'], 
+                            res['PRODUTO'], 
+                            res['PREÇO UNIT (R$)']
+                        ])
+                
+                if dados_historico:
+                    aba_historico.append_rows(dados_historico)
+                    st.success("✅ Histórico guardado na sua planilha do Drive com sucesso!")
+                else:
+                    st.warning("Não há preços calculados para salvar.")
 
 except Exception as e:
-    st.error(f"Erro no sistema: Verifique se o robô tem acesso à planilha ou se o nome está correto. Detalhe do erro: {e}")
+    st.error(f"Erro: {e}")
