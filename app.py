@@ -10,7 +10,15 @@ from datetime import datetime
 import google.generativeai as genai
 
 st.set_page_config(page_title="Compras Pizzaria - Franquia", layout="wide")
-
+# --- ESCONDER MENU E MARCA D'ÁGUA DO STREAMLIT ---
+esconder_menu = """
+    <style>
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    </style>
+    """
+st.markdown(esconder_menu, unsafe_allow_html=True)
 # Configurar a Inteligência Artificial do Google Gemini
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
