@@ -30,7 +30,7 @@ st.sidebar.title("📱 Módulo")
 modulo = st.sidebar.radio("O que você deseja fazer?", ["📦 Contagem de Estoque", "🛒 Cotações com IA"])
 
 NOME_PLANILHA = 'MARINGA ESTOQUE ' if unidade_selecionada == "Maringá" else 'BAURU ESTOQUE'
-nome_aba_cozinha = 'COZINHA' if unidade_selecionada == "Maringá" else 'COZINHA '
+nome_aba_cozinha = 'COZINHA' if unidade_selecionada == "Maringá" else 'COZINHA'
 
 if 'cotacoes_fornecedores' not in st.session_state:
     st.session_state['cotacoes_fornecedores'] = {} 
